@@ -1,12 +1,12 @@
 /**
-*****************************************************************************
-**
-** EEE3074W Project
-** Laser Guitar Synthesizer
-** Team 10
-**
-*****************************************************************************
-*/
+ *****************************************************************************
+ **
+ ** EEE3074W Project
+ ** Laser Guitar Synthesizer
+ ** Team 10
+ **
+ *****************************************************************************
+ */
 
 /* Includes */
 #include "stm32f4xx.h"
@@ -65,25 +65,42 @@ void RNG_Configuration(void);
 /* IRQ Handlers */
 void TIM4_IRQHandler(void)
 {
-   // Clear TIM4 Capture compare interrupt pending bit
-   TIM_ClearITPendingBit(TIM4, TIM_IT_CC1);
+	// Clear TIM4 Capture compare interrupt pending bit
+	TIM_ClearITPendingBit(TIM4, TIM_IT_CC1);
 
-   // Get the Input Capture value
-   IC1Value = TIM_GetCapture1(TIM4);
-   amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFF);
+	// Get the Input Capture value
+	IC1Value = TIM_GetCapture1(TIM4);
+	amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFF);
 
-   // Let us know that that the string was plucked
-   string_plucked = 1;
+	// Let us know that that the string was plucked
+	string_plucked = 1;
 }
 
+void EXTI1_IRQHandler(void)
+{
+	if(EXTI_GetITStatus(EXTI_Line1) != RESET)
+	{
+		if(GPIO_ReadInputDataBit(GPIOB, GPIO_Pin_1) == SET)
+		{
+			electrify = 1;
+		}
+		else
+		{
+			electrify = 0;
+		}
+
+		/* Clear the EXTI line 1 pending bit */
+		EXTI_ClearITPendingBit(EXTI_Line1);
+	}
+}
 
 /**
-**===========================================================================
-**
-**  Abstract: main program
-**
-**===========================================================================
-*/
+ **===========================================================================
+ **
+ **  Abstract: main program
+ **
+ **===========================================================================
+ */
 int main(void)
 {
 	volatile uint32_t sampleCounter = 0;
@@ -119,16 +136,16 @@ int main(void)
 	}
 
 	// infinite loop
-    while(1)
-    {
-    	if(string_plucked == 1)
-    	{
-    		// reset timer flag
-    		string_plucked = 0;
+	while(1)
+	{
+		if(string_plucked == 1)
+		{
+			// reset timer flag
+			string_plucked = 0;
 
-    		// Synthesize note
-    		volatile uint16_t i;
-    		volatile uint16_t j = 0;
+			// Synthesize note
+			volatile uint16_t i;
+			volatile uint16_t j = 0;
 			for(i = 0; i < duration; i++)
 			{
 				if (SPI_I2S_GetFlagStatus(CODEC_I2S, SPI_I2S_FLAG_TXE))
@@ -264,14 +281,14 @@ int main(void)
 					SPI_I2S_SendData(CODEC_I2S, 0);
 				}
 			}
-    	}
+		}
 
-    	// while laser not broken
+		// while laser not broken
 		if (SPI_I2S_GetFlagStatus(CODEC_I2S, SPI_I2S_FLAG_TXE))
 		{
 			SPI_I2S_SendData(CODEC_I2S, 0);
 		}
-    }
+	}
 }
 
 
@@ -286,6 +303,9 @@ void RCC_Configuration(void)
 
 	// enable clock for timer 4
 	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
+
+	// enable clock for EXTI
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
 }
 
 void GPIO_Configuration(void)
@@ -303,6 +323,24 @@ void GPIO_Configuration(void)
 
 	/* Connect TIM pin to AF2 */
 	GPIO_PinAFConfig(GPIOB, GPIO_PinSource7, GPIO_AF_TIM4);
+
+	/* Electric mode switch configuration: PB.01 */
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+	/* Connect Button EXTI Line to Button GPIO Pin */
+	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOB, EXTI_PinSource1);
+
+	EXTI_InitTypeDef EXTI_InitStructure;
+
+	/* Configure Button EXTI line */
+	EXTI_InitStructure.EXTI_Line = EXTI_Line1;
+	EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
+	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising_Falling;
+	EXTI_InitStructure.EXTI_LineCmd = ENABLE;
+	EXTI_Init(&EXTI_InitStructure);
 }
 
 void NVIC_Configuration(void)
@@ -313,6 +351,14 @@ void NVIC_Configuration(void)
 	NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
+	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+
+	NVIC_Init(&NVIC_InitStructure);
+
+	/* Enable and set Button EXTI Interrupt to the lowest priority */
+	NVIC_InitStructure.NVIC_IRQChannel = EXTI1_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x0F;
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
 
 	NVIC_Init(&NVIC_InitStructure);
