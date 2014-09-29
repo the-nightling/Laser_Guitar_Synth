@@ -21,12 +21,13 @@
 /* Private Global Variables */
 __IO uint16_t IC1Value = 0;			// Stores length of beam break pulse
 __IO uint8_t string_plucked = 0;	// timer flag
+__IO uint16_t ADC1_val;				// for volume control
 
 volatile uint8_t outBuffer[OUTBUFFERSIZE];
 
 volatile uint8_t electrify = 0;		// electric mode
 volatile uint32_t duration = 44100;	// controls duration of note
-volatile float amplitude = 1.0;
+volatile float amplitude = 1.0;		// controls volume via duration of pluck
 volatile float volume = 0.5;		// controls volume via volume knob
 
 volatile uint8_t stringNo = 6;
@@ -61,6 +62,7 @@ void GPIO_Configuration(void);
 void Timer_Configuration(void);
 void NVIC_Configuration(void);
 void RNG_Configuration(void);
+void ADC_Configuration(void);
 
 /* IRQ Handlers */
 void TIM4_IRQHandler(void)
@@ -70,6 +72,8 @@ void TIM4_IRQHandler(void)
 
 	// Get the Input Capture value
 	IC1Value = TIM_GetCapture1(TIM4);
+	volume = 10*((float)ADC1_val/59456);
+
 	amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFF);
 
 	// Let us know that that the string was plucked
@@ -122,6 +126,7 @@ int main(void)
 	RNG_Configuration();
 	codec_init();
 	codec_ctrl_init();
+	ADC_Configuration();
 
 	// Fill buffer with white noise
 	uint16_t n, m;
@@ -296,7 +301,8 @@ int main(void)
 void RCC_Configuration(void)
 {
 	// clocks for GPIOA, GPIOB, GPIOC and GPIOD have already been enable in codec.c
-	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB, ENABLE);
+	// enable clock for GPIOA, GPIOB, DMA2
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA|RCC_AHB1Periph_GPIOB|RCC_AHB1Periph_DMA2, ENABLE);
 
 	// enable clock for Random Number Generator
 	RCC_AHB2PeriphClockCmd(RCC_AHB2Periph_RNG, ENABLE);
@@ -304,8 +310,8 @@ void RCC_Configuration(void)
 	// enable clock for timer 4
 	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 
-	// enable clock for EXTI
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
+	// enable clock for SYSCFG for EXTI
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG|RCC_APB2Periph_ADC1, ENABLE);
 }
 
 void GPIO_Configuration(void)
@@ -341,6 +347,13 @@ void GPIO_Configuration(void)
 	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising_Falling;
 	EXTI_InitStructure.EXTI_LineCmd = ENABLE;
 	EXTI_Init(&EXTI_InitStructure);
+
+	/* Volume pin configuration */
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+
+	GPIO_Init(GPIOA, &GPIO_InitStructure);
 }
 
 void NVIC_Configuration(void)
@@ -396,6 +409,52 @@ void Timer_Configuration(void)
 
 	/* Enable the CC1 Interrupt Request */
 	TIM_ITConfig(TIM4, TIM_IT_CC1, ENABLE);
+}
+
+void ADC_Configuration(void)
+{
+	ADC_InitTypeDef ADC_InitStruct;
+	ADC_CommonInitTypeDef ADC_CommonInitStruct;
+	DMA_InitTypeDef DMA_InitStruct;
+
+	DMA_InitStruct.DMA_BufferSize = 1;
+	DMA_InitStruct.DMA_Channel = DMA_Channel_0;
+	DMA_InitStruct.DMA_DIR = DMA_DIR_PeripheralToMemory;
+	DMA_InitStruct.DMA_FIFOMode = DMA_FIFOMode_Disable;
+	DMA_InitStruct.DMA_FIFOThreshold = DMA_FIFOThreshold_HalfFull;
+	DMA_InitStruct.DMA_Memory0BaseAddr = (uint32_t)&ADC1_val;
+	DMA_InitStruct.DMA_MemoryBurst = DMA_MemoryBurst_Single;
+	DMA_InitStruct.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+	DMA_InitStruct.DMA_MemoryInc = DMA_MemoryInc_Disable;
+	DMA_InitStruct.DMA_Mode = DMA_Mode_Circular;
+	DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t) &ADC1->DR;
+	DMA_InitStruct.DMA_PeripheralBurst = DMA_PeripheralBurst_Single;
+	DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+	DMA_InitStruct.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+	DMA_InitStruct.DMA_Priority = DMA_Priority_High;
+	DMA_Init(DMA2_Stream4, &DMA_InitStruct);
+	DMA_Cmd(DMA2_Stream4, ENABLE);
+
+	ADC_CommonInitStruct.ADC_DMAAccessMode = ADC_DMAAccessMode_Disabled;
+	ADC_CommonInitStruct.ADC_Mode = ADC_Mode_Independent;
+	ADC_CommonInitStruct.ADC_Prescaler = ADC_Prescaler_Div2;
+	ADC_CommonInitStruct.ADC_TwoSamplingDelay = ADC_TwoSamplingDelay_5Cycles;
+	ADC_CommonInit(&ADC_CommonInitStruct);
+
+	ADC_InitStruct.ADC_ContinuousConvMode = ENABLE;
+	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
+	ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConvEdge_None;
+	ADC_InitStruct.ADC_NbrOfConversion = 1;
+	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
+	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
+	ADC_Init(ADC1, &ADC_InitStruct);
+
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_1, 1, ADC_SampleTime_3Cycles);
+	ADC_DMARequestAfterLastTransferCmd(ADC1, ENABLE);
+	ADC_DMACmd(ADC1, ENABLE);
+	ADC_Cmd(ADC1, ENABLE);
+
+	ADC_SoftwareStartConv(ADC1);
 }
 
 void RNG_Configuration(void)
