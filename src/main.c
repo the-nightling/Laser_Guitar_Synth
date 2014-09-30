@@ -24,8 +24,9 @@ __IO uint8_t string_plucked = 0;	// timer flag
 __IO uint16_t ADC1_val;				// for volume control
 
 volatile uint8_t outBuffer[OUTBUFFERSIZE];
-
+volatile uint8_t counter = 0;
 volatile uint8_t electrify = 0;		// electric mode
+volatile uint8_t mux_enable = 1;
 volatile uint32_t duration = 44100;	// controls duration of note
 volatile float amplitude = 1.0;		// controls volume via duration of pluck
 volatile float volume = 0.5;		// controls volume via volume knob
@@ -65,21 +66,94 @@ void RNG_Configuration(void);
 void ADC_Configuration(void);
 
 /* IRQ Handlers */
-void TIM4_IRQHandler(void)
+/*
+ * Cycle through 6 laser strings via multiplexer
+ */
+void TIM2_IRQHandler(void)
 {
-	// Clear TIM4 Capture compare interrupt pending bit
-	TIM_ClearITPendingBit(TIM4, TIM_IT_CC1);
+	// Clear TIM2 interrupt pending bit
+	if(TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET)
+	{
+		TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
+		if (mux_enable == 1) {
 
-	// Get the Input Capture value
-	IC1Value = TIM_GetCapture1(TIM4);
-	volume = 10*((float)ADC1_val/59456);
+			// set multiplexer input select pins
+			if(counter == 0)
+			{
+				GPIOE->BSRRH = GPIO_Pin_7;
+				GPIOE->BSRRH = GPIO_Pin_9;
+				GPIOE->BSRRH = GPIO_Pin_11;
+			}
+			else if (counter == 1)
+			{
+				GPIOE->BSRRH = GPIO_Pin_7;
+				GPIOE->BSRRH = GPIO_Pin_9;
+				GPIOE->BSRRL = GPIO_Pin_11;
+			}
+			else if (counter == 2)
+			{
+				GPIOE->BSRRH = GPIO_Pin_7;
+				GPIOE->BSRRL = GPIO_Pin_9;
+				GPIOE->BSRRH = GPIO_Pin_11;
+			}
+			else if (counter == 3)
+			{
+				GPIOE->BSRRH = GPIO_Pin_7;
+				GPIOE->BSRRL = GPIO_Pin_9;
+				GPIOE->BSRRL = GPIO_Pin_11;
+			}
+			else if (counter == 4)
+			{
+				GPIOE->BSRRL = GPIO_Pin_7;
+				GPIOE->BSRRH = GPIO_Pin_9;
+				GPIOE->BSRRH = GPIO_Pin_11;
+			}
+			else if (counter == 5)
+			{
+				GPIOE->BSRRL = GPIO_Pin_7;
+				GPIOE->BSRRH = GPIO_Pin_9;
+				GPIOE->BSRRL = GPIO_Pin_11;
+			}
 
-	amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFF);
-
-	// Let us know that that the string was plucked
-	string_plucked = 1;
+			counter++;
+			if(counter > 5)
+			{
+				counter = 0;
+			}
+		}
+	}
 }
 
+/*
+ * Trigger if laser string is plucked
+ */
+void TIM5_IRQHandler(void)
+{
+	// Clear TIM5 Capture compare interrupt pending bit (rising edge)
+	if(TIM_GetITStatus(TIM5, TIM_IT_CC2) == SET) {
+		TIM_ClearITPendingBit(TIM5, TIM_IT_CC2);
+		mux_enable = 0;
+	}
+
+	// Clear TIM5 Capture compare interrupt pending bit (falling edge)
+	if(TIM_GetITStatus(TIM5, TIM_IT_CC1) == SET) {
+		TIM_ClearITPendingBit(TIM5, TIM_IT_CC1);
+
+		// Get the Input Capture value
+		IC1Value = TIM_GetCapture1(TIM5);
+		volume = 10*((float)ADC1_val/59456);
+
+		amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFFFFFF);
+
+		// Let us know that that the string was plucked
+		string_plucked = 1;
+		mux_enable = 1;
+	}
+}
+
+/*
+ * Electric mode switch stuff
+ */
 void EXTI1_IRQHandler(void)
 {
 	if(EXTI_GetITStatus(EXTI_Line1) != RESET)
@@ -148,6 +222,43 @@ int main(void)
 			// reset timer flag
 			string_plucked = 0;
 
+			// set note based on laser string plucked
+			if(counter == 5)
+			{
+				noteFreq = 20.6;
+				octave = 2;
+			}
+			else if(counter == 4)
+			{
+				noteFreq = 27.5;
+				octave = 2;
+			}
+			else if(counter == 3)
+			{
+				noteFreq = 18.35;
+				octave = 3;
+			}
+			else if(counter == 2)
+			{
+				noteFreq = 24.5;
+				octave = 3;
+			}
+			else if(counter == 1)
+			{
+				noteFreq = 30.87;
+				octave = 3;
+			}
+			else if(counter == 0)
+			{
+				noteFreq = 20.6;
+				octave = 4;
+			}
+
+			// update note
+			DACBufferSize = (uint16_t)(((float)44100/(noteFreq*pow(2, octave))));
+			if(DACBufferSize & 0x00000001)
+				DACBufferSize +=1;
+
 			// Synthesize note
 			volatile uint16_t i;
 			volatile uint16_t j = 0;
@@ -196,54 +307,12 @@ int main(void)
 				}
 
 			}
-			n = 0;
+			n = 1000;
 
 			// output sound
 			while(1)
 			{
-				// cycle through strings if the string is plucked while note is being played
-				// (this is only to check the different strings using only 1 laser; will be removed later)
-				if(string_plucked == 1)
-				{
-					stringNo--;
-					if(stringNo == 0)
-						stringNo = 6;
-
-					if(stringNo == 6)
-					{
-						noteFreq = 20.6;
-						octave = 2;
-					}
-					else if(stringNo == 5)
-					{
-						noteFreq = 27.5;
-						octave = 2;
-					}
-					else if(stringNo == 4)
-					{
-						noteFreq = 18.35;
-						octave = 3;
-					}
-					else if(stringNo == 3)
-					{
-						noteFreq = 24.5;
-						octave = 3;
-					}
-					else if(stringNo == 2)
-					{
-						noteFreq = 30.87;
-						octave = 3;
-					}
-					else if(stringNo == 1)
-					{
-						noteFreq = 20.6;
-						octave = 4;
-					}
-
-					// update note
-					DACBufferSize = (uint16_t)(((float)44100/(noteFreq*pow(2, octave))));
-					if(DACBufferSize & 0x00000001)
-						DACBufferSize +=1;
+				if(string_plucked == 1) {
 					break;
 				}
 
@@ -260,7 +329,6 @@ int main(void)
 							n = 0;
 							break;	// exit loop when note ends
 						}
-
 
 						sample = (int16_t)(amplitude*outBuffer[n]);
 
@@ -301,14 +369,14 @@ int main(void)
 void RCC_Configuration(void)
 {
 	// clocks for GPIOA, GPIOB, GPIOC and GPIOD have already been enable in codec.c
-	// enable clock for GPIOA, GPIOB, DMA2
-	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA|RCC_AHB1Periph_GPIOB|RCC_AHB1Periph_DMA2, ENABLE);
+	// enable clock for GPIOA, GPIOB, GPIOE and DMA2
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA|RCC_AHB1Periph_GPIOB|RCC_AHB1Periph_GPIOE|RCC_AHB1Periph_DMA2, ENABLE);
 
 	// enable clock for Random Number Generator
 	RCC_AHB2PeriphClockCmd(RCC_AHB2Periph_RNG, ENABLE);
 
-	// enable clock for timer 4
-	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
+	// enable clock for timers 2 and 5
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5|RCC_APB1Periph_TIM2, ENABLE);
 
 	// enable clock for SYSCFG for EXTI
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG|RCC_APB2Periph_ADC1, ENABLE);
@@ -318,17 +386,17 @@ void GPIO_Configuration(void)
 {
 	GPIO_InitTypeDef GPIO_InitStructure;
 
-	/* TIM4 channel2 configuration : PB.07 */
-	GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_7;
+	/* TIM5 channel2 configuration : PA.01 */
+	GPIO_InitStructure.GPIO_Pin   = GPIO_Pin_1;
 	GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AF;
 	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
 	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
 	GPIO_InitStructure.GPIO_PuPd  = GPIO_PuPd_NOPULL;
 
-	GPIO_Init(GPIOB, &GPIO_InitStructure);
+	GPIO_Init(GPIOA, &GPIO_InitStructure);
 
 	/* Connect TIM pin to AF2 */
-	GPIO_PinAFConfig(GPIOB, GPIO_PinSource7, GPIO_AF_TIM4);
+	GPIO_PinAFConfig(GPIOA, GPIO_PinSource1, GPIO_AF_TIM5);
 
 	/* Electric mode switch configuration: PB.01 */
 	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
@@ -336,12 +404,12 @@ void GPIO_Configuration(void)
 	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
 	GPIO_Init(GPIOB, &GPIO_InitStructure);
 
-	/* Connect Button EXTI Line to Button GPIO Pin */
+	/* Connect EXTI Line to GPIO Pin */
 	SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOB, EXTI_PinSource1);
 
 	EXTI_InitTypeDef EXTI_InitStructure;
 
-	/* Configure Button EXTI line */
+	/* Configure EXTI line */
 	EXTI_InitStructure.EXTI_Line = EXTI_Line1;
 	EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt;
 	EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Rising_Falling;
@@ -350,18 +418,34 @@ void GPIO_Configuration(void)
 
 	/* Volume pin configuration */
 	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
-	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2;
 	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
 
 	GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+	/* Multiplexer switching configuration */
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_7;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+	GPIO_Init(GPIOE, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_9;
+	GPIO_Init(GPIOE, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11;
+	GPIO_Init(GPIOE, &GPIO_InitStructure);
+
 }
 
 void NVIC_Configuration(void)
 {
 	NVIC_InitTypeDef NVIC_InitStructure;
+	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);
 
-	/* Enable the TIM4 global Interrupt */
-	NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
+	/* Enable the TIM5 global Interrupt */
+	NVIC_InitStructure.NVIC_IRQChannel = TIM5_IRQn;
 	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
 	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
@@ -370,8 +454,16 @@ void NVIC_Configuration(void)
 
 	/* Enable and set Button EXTI Interrupt to the lowest priority */
 	NVIC_InitStructure.NVIC_IRQChannel = EXTI1_IRQn;
-	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0x0F;
-	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0x0F;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
+	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+
+	NVIC_Init(&NVIC_InitStructure);
+
+	/* Enable the TIM2 global Interrupt*/
+	NVIC_InitStructure.NVIC_IRQChannel = TIM2_IRQn;
+	NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;
+	NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
 	NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
 
 	NVIC_Init(&NVIC_InitStructure);
@@ -382,34 +474,50 @@ void Timer_Configuration(void)
 	TIM_ICInitTypeDef  TIM_ICInitStructure;
 	TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
 
-	TIM_TimeBaseStructure.TIM_Period = 65535;
+	TIM_TimeBaseStructure.TIM_Period = 0xFFFFFFFF;
 	TIM_TimeBaseStructure.TIM_Prescaler = 2000;
 	TIM_TimeBaseStructure.TIM_ClockDivision = 0;
 	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
-	TIM_TimeBaseInit(TIM4, &TIM_TimeBaseStructure);
+	TIM_TimeBaseInit(TIM5, &TIM_TimeBaseStructure);
 
 	TIM_ICInitStructure.TIM_Channel = TIM_Channel_2;
 	TIM_ICInitStructure.TIM_ICPolarity = TIM_ICPolarity_Rising;
 	TIM_ICInitStructure.TIM_ICSelection = TIM_ICSelection_DirectTI;
 	TIM_ICInitStructure.TIM_ICPrescaler = TIM_ICPSC_DIV1;
-	TIM_ICInitStructure.TIM_ICFilter = 0x0;
+	TIM_ICInitStructure.TIM_ICFilter = 0x3;
 
+	TIM_PWMIConfig(TIM5, &TIM_ICInitStructure);
 
-	TIM_PWMIConfig(TIM4, &TIM_ICInitStructure);
-
-	/* Select the TIM4 Input Trigger: TI2FP2 */
-	TIM_SelectInputTrigger(TIM4, TIM_TS_TI2FP2);
+	/* Select the TIM5 Input Trigger: TI2FP2 */
+	TIM_SelectInputTrigger(TIM5, TIM_TS_TI2FP2);
 
 	/* Select the slave Mode: Reset Mode */
-	TIM_SelectSlaveMode(TIM4, TIM_SlaveMode_Reset);
-	TIM_SelectMasterSlaveMode(TIM4,TIM_MasterSlaveMode_Enable);
-	//TIM_SelectOnePulseMode(TIM4, TIM_OPMode_Single);
+	TIM_SelectSlaveMode(TIM5, TIM_SlaveMode_Reset);
+	TIM_SelectMasterSlaveMode(TIM5,TIM_MasterSlaveMode_Enable);
+
 	/* TIM enable counter */
-	TIM_Cmd(TIM4, ENABLE);
+	TIM_Cmd(TIM5, ENABLE);
 
 	/* Enable the CC1 Interrupt Request */
-	TIM_ITConfig(TIM4, TIM_IT_CC1, ENABLE);
+	TIM_ITConfig(TIM5, TIM_IT_CC1 | TIM_IT_CC2, ENABLE);
+
+	// TIM2 Setup
+
+	TIM_TimeBaseStructInit(&TIM_TimeBaseStructure);
+
+	TIM_TimeBaseStructure.TIM_Period = 840-1;
+	TIM_TimeBaseStructure.TIM_Prescaler = 1-1;
+	TIM_TimeBaseStructure.TIM_ClockDivision = 0;
+	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+
+	TIM_TimeBaseInit(TIM2, &TIM_TimeBaseStructure);
+
+	/* Enable the Interrupt Request */
+	TIM_ITConfig(TIM2, TIM_IT_Update, ENABLE);
+
+	TIM_Cmd(TIM2, ENABLE);
 }
+
 
 void ADC_Configuration(void)
 {
@@ -449,7 +557,7 @@ void ADC_Configuration(void)
 	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
 	ADC_Init(ADC1, &ADC_InitStruct);
 
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_1, 1, ADC_SampleTime_3Cycles);
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_3Cycles);
 	ADC_DMARequestAfterLastTransferCmd(ADC1, ENABLE);
 	ADC_DMACmd(ADC1, ENABLE);
 	ADC_Cmd(ADC1, ENABLE);
