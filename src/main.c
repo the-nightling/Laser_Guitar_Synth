@@ -86,9 +86,9 @@ void TIM2_IRQHandler(void)
 			}
 			else if (counter == 1)
 			{
-				GPIOE->BSRRH = GPIO_Pin_7;
+				GPIOE->BSRRL = GPIO_Pin_7;
 				GPIOE->BSRRH = GPIO_Pin_9;
-				GPIOE->BSRRL = GPIO_Pin_11;
+				GPIOE->BSRRH = GPIO_Pin_11;
 			}
 			else if (counter == 2)
 			{
@@ -98,15 +98,15 @@ void TIM2_IRQHandler(void)
 			}
 			else if (counter == 3)
 			{
-				GPIOE->BSRRH = GPIO_Pin_7;
+				GPIOE->BSRRL = GPIO_Pin_7;
 				GPIOE->BSRRL = GPIO_Pin_9;
-				GPIOE->BSRRL = GPIO_Pin_11;
+				GPIOE->BSRRH = GPIO_Pin_11;
 			}
 			else if (counter == 4)
 			{
-				GPIOE->BSRRL = GPIO_Pin_7;
+				GPIOE->BSRRH = GPIO_Pin_7;
 				GPIOE->BSRRH = GPIO_Pin_9;
-				GPIOE->BSRRH = GPIO_Pin_11;
+				GPIOE->BSRRL = GPIO_Pin_11;
 			}
 			else if (counter == 5)
 			{
@@ -129,24 +129,25 @@ void TIM2_IRQHandler(void)
  */
 void TIM5_IRQHandler(void)
 {
-	// Clear TIM5 Capture compare interrupt pending bit (rising edge)
-	if(TIM_GetITStatus(TIM5, TIM_IT_CC2) == SET) {
-		TIM_ClearITPendingBit(TIM5, TIM_IT_CC2);
-		mux_enable = 0;
-	}
-
 	// Clear TIM5 Capture compare interrupt pending bit (falling edge)
 	if(TIM_GetITStatus(TIM5, TIM_IT_CC1) == SET) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC1);
+		mux_enable = 0;
 
 		// Get the Input Capture value
-		IC1Value = TIM_GetCapture1(TIM5);
+		//IC1Value = TIM_GetCapture1(TIM5);
 		volume = 10*((float)ADC1_val/59456);
 
-		amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFFFFFF);
+		//amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFFFFFF);
+		amplitude = (float)(volume);
 
-		// Let us know that that the string was plucked
+		// Let us know that the string was plucked
 		string_plucked = 1;
+	}
+
+	// Clear TIM5 Capture compare interrupt pending bit (rising edge)
+	if(TIM_GetITStatus(TIM5, TIM_IT_CC2) == SET) {
+		TIM_ClearITPendingBit(TIM5, TIM_IT_CC2);
 		mux_enable = 1;
 	}
 }
@@ -223,32 +224,32 @@ int main(void)
 			string_plucked = 0;
 
 			// set note based on laser string plucked
-			if(counter == 5)
-			{
-				noteFreq = 20.6;
-				octave = 2;
-			}
-			else if(counter == 4)
-			{
-				noteFreq = 27.5;
-				octave = 2;
-			}
-			else if(counter == 3)
-			{
-				noteFreq = 18.35;
-				octave = 3;
-			}
-			else if(counter == 2)
+			if(counter == 5)		// D3(3)
 			{
 				noteFreq = 24.5;
 				octave = 3;
 			}
-			else if(counter == 1)
+			else if(counter == 4)	// D2(4)
+			{
+				noteFreq = 18.35;
+				octave = 3;
+			}
+			else if(counter == 3)	// D1(5)
+			{
+				noteFreq = 27.5;
+				octave = 2;
+			}
+			else if(counter == 2)	// D0(6)
+			{
+				noteFreq = 20.6;
+				octave = 2;
+			}
+			else if(counter == 1)	// D5(2)
 			{
 				noteFreq = 30.87;
 				octave = 3;
 			}
-			else if(counter == 0)
+			else if(counter == 0)	// D4(1)
 			{
 				noteFreq = 20.6;
 				octave = 4;
@@ -327,6 +328,7 @@ int main(void)
 						if(n >= duration)
 						{
 							n = 0;
+							mux_enable = 1;
 							break;	// exit loop when note ends
 						}
 
