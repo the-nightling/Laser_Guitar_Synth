@@ -19,23 +19,22 @@
 #define DACBUFFERSIZE 600
 
 /* Private Global Variables */
+__IO uint8_t outBuffer[OUTBUFFERSIZE];
+__IO uint16_t ADC1_val[7];			// for volume control
 __IO uint16_t IC1Value = 0;			// Stores length of beam break pulse
 __IO uint8_t string_plucked = 0;	// timer flag
-__IO uint16_t ADC1_val;				// for volume control
+__IO uint8_t mux_enable = 1;
+__IO uint8_t electrify = 0;		// electric mode
+__IO uint8_t counter = 0;
+__IO uint8_t stringNo = 6;
+__IO uint8_t octave = 4;
+__IO float noteFreq = 20.6;
+__IO float amplitude = 1.0;		// controls volume via duration of pluck
+__IO float volume = 0.5;		// controls volume via volume knob
+__IO uint32_t duration = 44100;	// controls duration of note
 
-volatile uint8_t outBuffer[OUTBUFFERSIZE];
-volatile uint8_t counter = 0;
-volatile uint8_t electrify = 0;		// electric mode
-volatile uint8_t mux_enable = 1;
-volatile uint32_t duration = 44100;	// controls duration of note
-volatile float amplitude = 1.0;		// controls volume via duration of pluck
-volatile float volume = 0.5;		// controls volume via volume knob
 
-volatile uint8_t stringNo = 6;
-volatile uint8_t octave = 4;
-volatile float noteFreq = 20.6;
-
-// Guitar notes reference
+// Guitar notes buffer length reference
 // C = 16.35	          C3 = 338, C4 = 168
 // C#= 17.32	          C#3= 318, C#4= 160
 // D = 18.35	          D3 = 300, D4 = 150
@@ -132,23 +131,22 @@ void TIM5_IRQHandler(void)
 	// Clear TIM5 Capture compare interrupt pending bit (falling edge)
 	if(TIM_GetITStatus(TIM5, TIM_IT_CC1) == SET) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC1);
-		mux_enable = 0;
+		mux_enable = 1;
+	}
 
+	// Clear TIM5 Capture compare interrupt pending bit (rising edge)
+	if(TIM_GetITStatus(TIM5, TIM_IT_CC2) == SET) {
+		TIM_ClearITPendingBit(TIM5, TIM_IT_CC2);
+		mux_enable = 0;
 		// Get the Input Capture value
 		//IC1Value = TIM_GetCapture1(TIM5);
-		volume = 10*((float)ADC1_val/59456);
+		volume = 10*((float)ADC1_val[0]/59456);
 
 		//amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFFFFFF);
 		amplitude = (float)(volume);
 
 		// Let us know that the string was plucked
 		string_plucked = 1;
-	}
-
-	// Clear TIM5 Capture compare interrupt pending bit (rising edge)
-	if(TIM_GetITStatus(TIM5, TIM_IT_CC2) == SET) {
-		TIM_ClearITPendingBit(TIM5, TIM_IT_CC2);
-		mux_enable = 1;
 	}
 }
 
@@ -224,35 +222,203 @@ int main(void)
 			string_plucked = 0;
 
 			// set note based on laser string plucked
-			if(counter == 5)		// D3(3)
+			if(counter == 5)		// D3(String 2)
 			{
-				noteFreq = 24.5;
-				octave = 3;
+				if(ADC1_val[5] > 60000)			// B3
+				{
+					noteFreq = 30.87;
+					octave = 3;
+				}
+				else if(ADC1_val[5] > 42000)	// Eb4
+				{
+					noteFreq = 19.45;
+					octave = 4;
+				}
+				else if(ADC1_val[5] > 39000)	// D4
+				{
+					noteFreq = 18.35;
+					octave = 4;
+				}
+				else if(ADC1_val[5] > 35000)	// C#4
+				{
+					noteFreq = 17.32;
+					octave = 4;
+				}
+				else if(ADC1_val[5] > 32000)	// C4
+				{
+					noteFreq = 16.35;
+					octave = 4;
+				}
+				else							// B3
+				{
+					noteFreq = 30.87;
+					octave = 3;
+				}
 			}
-			else if(counter == 4)	// D2(4)
+			else if(counter == 4)	// D2(String 3)
 			{
-				noteFreq = 18.35;
-				octave = 3;
+				if(ADC1_val[4] > 60000)			// G3
+				{
+					noteFreq = 24.50;
+					octave = 3;
+				}
+				else if(ADC1_val[4] > 42000)	// B3
+				{
+					noteFreq = 30.87;
+					octave = 3;
+				}
+				else if(ADC1_val[4] > 39000)	// Bb3
+				{
+					noteFreq = 29.14;
+					octave = 3;
+				}
+				else if(ADC1_val[4] > 35000)	// A3
+				{
+					noteFreq = 27.50;
+					octave = 3;
+				}
+				else if(ADC1_val[4] > 32000)	// G#3
+				{
+					noteFreq = 25.96;
+					octave = 3;
+				}
+				else							// G3
+				{
+					noteFreq = 24.50;
+					octave = 3;
+				}
 			}
-			else if(counter == 3)	// D1(5)
+			else if(counter == 3)	// D1(String 4)
 			{
-				noteFreq = 27.5;
-				octave = 2;
+				if(ADC1_val[3] > 60000)			// D3
+				{
+					noteFreq = 18.35;
+					octave = 3;
+				}
+				else if(ADC1_val[3] > 42000)	// F#3
+				{
+					noteFreq = 23.12;
+					octave = 3;
+				}
+				else if(ADC1_val[3] > 39000)	// F3
+				{
+					noteFreq = 21.83;
+					octave = 3;
+				}
+				else if(ADC1_val[3] > 35000)	// E3
+				{
+					noteFreq = 20.60;
+					octave = 3;
+				}
+				else if(ADC1_val[3] > 32000)	// Eb3
+				{
+					noteFreq = 19.45;
+					octave = 3;
+				}
+				else							// D3
+				{
+					noteFreq = 18.35;
+					octave = 3;
+				}
 			}
-			else if(counter == 2)	// D0(6)
+			else if(counter == 2)	// D0(String 5)
 			{
-				noteFreq = 20.6;
-				octave = 2;
+				if(ADC1_val[2] > 60000)			// A2
+				{
+					noteFreq = 27.50;
+					octave = 2;
+				}
+				else if(ADC1_val[2] > 42000)	// C#3
+				{
+					noteFreq = 17.32;
+					octave = 3;
+				}
+				else if(ADC1_val[2] > 39000)	// C3
+				{
+					noteFreq = 16.35;
+					octave = 3;
+				}
+				else if(ADC1_val[2] > 35000)	// B2
+				{
+					noteFreq = 30.87;
+					octave = 2;
+				}
+				else if(ADC1_val[2] > 32000)	// Bb2
+				{
+					noteFreq = 29.14;
+					octave = 2;
+				}
+				else							// A2
+				{
+					noteFreq = 27.50;
+					octave = 2;
+				}
 			}
-			else if(counter == 1)	// D5(2)
+			else if(counter == 1)	// D5(String 6)
 			{
-				noteFreq = 30.87;
-				octave = 3;
+				if(ADC1_val[1] > 60000)			// E2
+				{
+					noteFreq = 20.60;
+					octave = 2;
+				}
+				else if(ADC1_val[1] > 42000)	// G#2
+				{
+					noteFreq = 25.96;
+					octave = 2;
+				}
+				else if(ADC1_val[1] > 39000)	// G2
+				{
+					noteFreq = 24.50;
+					octave = 2;
+				}
+				else if(ADC1_val[1] > 35000)	// F#2
+				{
+					noteFreq = 23.12;
+					octave = 2;
+				}
+				else if(ADC1_val[1] > 32000)	// F2
+				{
+					noteFreq = 21.83;
+					octave = 2;
+				}
+				else							// E2
+				{
+					noteFreq = 20.60;
+					octave = 2;
+				}
 			}
-			else if(counter == 0)	// D4(1)
+			else if(counter == 0)	// D4(String 1)
 			{
-				noteFreq = 20.6;
-				octave = 4;
+				if(ADC1_val[6] > 60000)			// E4
+				{
+					noteFreq = 20.60;
+					octave = 4;
+				}
+				else if(ADC1_val[6] > 42000)	// G#4
+				{
+					noteFreq = 25.96;
+					octave = 4;
+				}
+				else if(ADC1_val[6] > 39000)	// G4
+				{
+					noteFreq = 24.50;
+					octave = 4;
+				}
+				else if(ADC1_val[6] > 35000)	// F#4
+				{
+					noteFreq = 23.12;
+					octave = 4;
+				}
+				else if(ADC1_val[6] > 32000)	// F4
+				{
+					noteFreq = 21.83;
+					octave = 4;
+				}
+				else							// E4
+				{
+					noteFreq = 20.60;
+					octave = 4;
+				}
 			}
 
 			// update note
@@ -265,6 +431,7 @@ int main(void)
 			volatile uint16_t j = 0;
 			for(i = 0; i < duration; i++)
 			{
+				// send silence to audio DAC while note is being synthesized (gets rid of static noise)
 				if (SPI_I2S_GetFlagStatus(CODEC_I2S, SPI_I2S_FLAG_TXE))
 				{
 					SPI_I2S_SendData(CODEC_I2S, 0);
@@ -293,6 +460,7 @@ int main(void)
 
 				j++;
 
+				// send silence to audio DAC while note is being synthesized (gets rid of static noise)
 				if(j == DACBufferSize)
 				{
 					for(n=0; n < DACBufferSize; n++)
@@ -328,7 +496,7 @@ int main(void)
 						if(n >= duration)
 						{
 							n = 0;
-							mux_enable = 1;
+							//mux_enable = 1;
 							break;	// exit loop when note ends
 						}
 
@@ -351,6 +519,7 @@ int main(void)
 			{
 				DACBuffer[m] = noiseBuffer[m];
 
+				// send silence to audio DAC while no note is being played (gets rid of static noise)
 				if (SPI_I2S_GetFlagStatus(CODEC_I2S, SPI_I2S_FLAG_TXE))
 				{
 					SPI_I2S_SendData(CODEC_I2S, 0);
@@ -359,6 +528,7 @@ int main(void)
 		}
 
 		// while laser not broken
+		// send silence to audio DAC while no note is being played (gets rid of static noise)
 		if (SPI_I2S_GetFlagStatus(CODEC_I2S, SPI_I2S_FLAG_TXE))
 		{
 			SPI_I2S_SendData(CODEC_I2S, 0);
@@ -370,9 +540,8 @@ int main(void)
 
 void RCC_Configuration(void)
 {
-	// clocks for GPIOA, GPIOB, GPIOC and GPIOD have already been enable in codec.c
-	// enable clock for GPIOA, GPIOB, GPIOE and DMA2
-	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA|RCC_AHB1Periph_GPIOB|RCC_AHB1Periph_GPIOE|RCC_AHB1Periph_DMA2, ENABLE);
+	// enable clock for GPIOA, GPIOB, GPIOC, GPIOE and DMA2
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA|RCC_AHB1Periph_GPIOB|RCC_AHB1Periph_GPIOC|RCC_AHB1Periph_GPIOE|RCC_AHB1Periph_DMA2, ENABLE);
 
 	// enable clock for Random Number Generator
 	RCC_AHB2PeriphClockCmd(RCC_AHB2Periph_RNG, ENABLE);
@@ -420,10 +589,22 @@ void GPIO_Configuration(void)
 
 	/* Volume pin configuration */
 	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
-	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2 | GPIO_Pin_3;
 	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
 
 	GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+
+	GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_4 | GPIO_Pin_5;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+
+	GPIO_Init(GPIOC, &GPIO_InitStructure);
 
 	/* Multiplexer switching configuration */
 	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_7;
@@ -527,15 +708,15 @@ void ADC_Configuration(void)
 	ADC_CommonInitTypeDef ADC_CommonInitStruct;
 	DMA_InitTypeDef DMA_InitStruct;
 
-	DMA_InitStruct.DMA_BufferSize = 1;
+	DMA_InitStruct.DMA_BufferSize = 7;
 	DMA_InitStruct.DMA_Channel = DMA_Channel_0;
 	DMA_InitStruct.DMA_DIR = DMA_DIR_PeripheralToMemory;
 	DMA_InitStruct.DMA_FIFOMode = DMA_FIFOMode_Disable;
 	DMA_InitStruct.DMA_FIFOThreshold = DMA_FIFOThreshold_HalfFull;
-	DMA_InitStruct.DMA_Memory0BaseAddr = (uint32_t)&ADC1_val;
+	DMA_InitStruct.DMA_Memory0BaseAddr = (uint32_t)&ADC1_val[0];
 	DMA_InitStruct.DMA_MemoryBurst = DMA_MemoryBurst_Single;
 	DMA_InitStruct.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
-	DMA_InitStruct.DMA_MemoryInc = DMA_MemoryInc_Disable;
+	DMA_InitStruct.DMA_MemoryInc = DMA_MemoryInc_Enable;
 	DMA_InitStruct.DMA_Mode = DMA_Mode_Circular;
 	DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t) &ADC1->DR;
 	DMA_InitStruct.DMA_PeripheralBurst = DMA_PeripheralBurst_Single;
@@ -554,12 +735,20 @@ void ADC_Configuration(void)
 	ADC_InitStruct.ADC_ContinuousConvMode = ENABLE;
 	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
 	ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConvEdge_None;
-	ADC_InitStruct.ADC_NbrOfConversion = 1;
+	ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T1_CC1;
+	ADC_InitStruct.ADC_NbrOfConversion = 7;
 	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
-	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
+	ADC_InitStruct.ADC_ScanConvMode = ENABLE;
 	ADC_Init(ADC1, &ADC_InitStruct);
 
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_3Cycles);
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_2, 1, ADC_SampleTime_112Cycles); //PA2
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_3, 2, ADC_SampleTime_112Cycles); //PA3
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_8, 3, ADC_SampleTime_112Cycles); //PB0
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_11, 4, ADC_SampleTime_112Cycles); //PC1
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_12, 5, ADC_SampleTime_112Cycles); //PC2
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_14, 6, ADC_SampleTime_112Cycles); //PC4
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_15, 7, ADC_SampleTime_112Cycles); //PC5
+
 	ADC_DMARequestAfterLastTransferCmd(ADC1, ENABLE);
 	ADC_DMACmd(ADC1, ENABLE);
 	ADC_Cmd(ADC1, ENABLE);
