@@ -5,6 +5,12 @@
  ** Laser Guitar Synthesizer
  ** Team 10
  **
+ ** Description:
+ ** Upon an external trigger (plucking of laser string), the software:
+ ** (i)   checks the volume, mode, note frequency and octave parameters
+ ** (ii)  synthesizes the note corresponding to those parameters and saves the result in a buffer
+ ** (iii) outputs the buffer contents via the on-board audio DAC
+ **
  *****************************************************************************
  */
 
@@ -19,17 +25,17 @@
 #define DACBUFFERSIZE 600
 
 /* Private Global Variables */
-__IO uint8_t outBuffer[OUTBUFFERSIZE];
-__IO uint16_t ADC1_val[7];			// for volume control
-__IO uint16_t IC1Value = 0;			// Stores length of beam break pulse
-__IO uint8_t string_plucked = 0;	// timer flag
-__IO uint8_t mux_enable = 1;
-__IO uint8_t electrify = 0;		// electric mode
+__IO uint8_t outBuffer[OUTBUFFERSIZE];	// stores synthesized note waveform
+__IO uint16_t ADC1_val[7];				// volume knob and fret buttons voltage
+__IO uint16_t IC1Value = 0;				// Stores length of beam break pulse (isn't being used)
+__IO uint8_t string_plucked = 0;		// flag to indicate when a string was plucked
+__IO uint8_t mux_enable = 1;			// flag to indicate if multiplexer is cycling through select pins
+__IO uint8_t electrify = 0;				// flag to set/reset electric (reverb) mode
 __IO uint8_t counter = 0;
-__IO uint8_t stringNo = 6;
-__IO uint8_t octave = 4;
-__IO float noteFreq = 20.6;
-__IO float amplitude = 1.0;		// controls volume via duration of pluck
+__IO uint8_t stringNo = 6;				// default guitar string (laser)
+__IO uint8_t octave = 4;				// default octave
+__IO float noteFreq = 20.6;				// default note frequency
+__IO float amplitude = 1.0;		// controls volume via duration of pluck (length of beam break can potentially change volume; not being used)
 __IO float volume = 0.5;		// controls volume via volume knob
 __IO uint32_t duration = 44100;	// controls duration of note
 
@@ -64,7 +70,15 @@ void NVIC_Configuration(void);
 void RNG_Configuration(void);
 void ADC_Configuration(void);
 
-/* IRQ Handlers */
+
+
+/**
+ **===========================================================================
+ **
+ **  IRQ Handlers
+ **
+ **===========================================================================
+ */
 /*
  * Cycle through 6 laser strings via multiplexer
  */
@@ -74,6 +88,8 @@ void TIM2_IRQHandler(void)
 	if(TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET)
 	{
 		TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
+
+		// cycle through 6 multiplexer pins while mux flag is high
 		if (mux_enable == 1) {
 
 			// set multiplexer input select pins
@@ -131,15 +147,20 @@ void TIM5_IRQHandler(void)
 	// Clear TIM5 Capture compare interrupt pending bit (falling edge)
 	if(TIM_GetITStatus(TIM5, TIM_IT_CC1) == SET) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC1);
+
+		// re-enable multiplexer pin cycling when laser is no longer broken
 		mux_enable = 1;
 	}
 
 	// Clear TIM5 Capture compare interrupt pending bit (rising edge)
 	if(TIM_GetITStatus(TIM5, TIM_IT_CC2) == SET) {
 		TIM_ClearITPendingBit(TIM5, TIM_IT_CC2);
+
+		// disable multiplexer pin cycling as soon as laser is broken
 		mux_enable = 0;
+
 		// Get the Input Capture value
-		//IC1Value = TIM_GetCapture1(TIM5);
+		//IC1Value = TIM_GetCapture1(TIM5);		// for volume controlled by duration of pluck (not being used)
 		volume = 10*((float)ADC1_val[0]/59456);
 
 		//amplitude = (float)(volume)*(1-(float)IC1Value/0xFFFFFFFF);
@@ -182,15 +203,17 @@ int main(void)
 {
 	volatile uint32_t sampleCounter = 0;
 	volatile int16_t sample = 0;
-	volatile uint8_t DACBuffer[DACBUFFERSIZE];
+	volatile uint8_t DACBuffer[DACBUFFERSIZE];		// buffer used for synthesis algorithm; length determines note frequency and octave
 	volatile uint8_t tempBuffer[DACBUFFERSIZE];
 	volatile uint8_t noiseBuffer[DACBUFFERSIZE];
 
+	// Calculation of buffer length corresponding to note that needs to be played (using default values here)
 	// duration/(note frequency x 2^octave) if odd, add 1
 	uint16_t DACBufferSize = (uint16_t)(((float)44100/(noteFreq*pow(2, octave))));
 	if(DACBufferSize & 0x00000001)
 		DACBufferSize +=1;
 
+	// initialising peripherals
 	SystemInit();
 	RCC_Configuration();
 	GPIO_Configuration();
@@ -213,7 +236,7 @@ int main(void)
 		RNG_ClearFlag(RNG_FLAG_DRDY);
 	}
 
-	// infinite loop
+	// infinite loop contains synthesis and output code
 	while(1)
 	{
 		if(string_plucked == 1)
@@ -222,6 +245,7 @@ int main(void)
 			string_plucked = 0;
 
 			// set note based on laser string plucked
+			// and fret button pushed
 			if(counter == 5)		// D3(String 2)
 			{
 				if(ADC1_val[5] > 60000)			// B3
@@ -421,7 +445,7 @@ int main(void)
 				}
 			}
 
-			// update note
+			// update buffer length according to note desired
 			DACBufferSize = (uint16_t)(((float)44100/(noteFreq*pow(2, octave))));
 			if(DACBufferSize & 0x00000001)
 				DACBufferSize +=1;
@@ -448,7 +472,7 @@ int main(void)
 				}
 				outBuffer[i] = (uint8_t)tempBuffer[j];
 
-				// electric mode
+				// electric mode (clips waveform)
 				if(electrify == 1 && outBuffer[i] >= 105)
 				{
 					//outBuffer[i] = 55;
@@ -460,13 +484,14 @@ int main(void)
 
 				j++;
 
-				// send silence to audio DAC while note is being synthesized (gets rid of static noise)
+				// values synthesized are re-used to synthesize newer values (simulates a queue)
 				if(j == DACBufferSize)
 				{
 					for(n=0; n < DACBufferSize; n++)
 					{
 						DACBuffer[n] = tempBuffer[n];
 
+						// send silence to audio DAC while note is being synthesized (gets rid of static noise)
 						if (SPI_I2S_GetFlagStatus(CODEC_I2S, SPI_I2S_FLAG_TXE))
 						{
 							SPI_I2S_SendData(CODEC_I2S, 0);
@@ -476,11 +501,15 @@ int main(void)
 				}
 
 			}
+
+			// determines where in the output buffer we should start sending values to audioDAC
+			// helps get rid of some delay
 			n = 1000;
 
 			// output sound
 			while(1)
 			{
+				// if a new string has been plucked, stop outputting and re-start synthesis
 				if(string_plucked == 1) {
 					break;
 				}
@@ -496,13 +525,13 @@ int main(void)
 						if(n >= duration)
 						{
 							n = 0;
-							//mux_enable = 1;
+
 							break;	// exit loop when note ends
 						}
 
 						sample = (int16_t)(amplitude*outBuffer[n]);
 
-						// change increment value to change frequency
+						// change increment value to change frequency (should not be used)
 						n += 1;
 					}
 					sampleCounter++;
@@ -756,6 +785,7 @@ void ADC_Configuration(void)
 	ADC_SoftwareStartConv(ADC1);
 }
 
+// Random Number Generator setup
 void RNG_Configuration(void)
 {
 	RNG_Cmd(ENABLE);
